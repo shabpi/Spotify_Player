@@ -39,14 +39,26 @@
 // 2) Add redirect URI exactly:  http://127.0.0.1:8888/
 // 3) Paste the Client ID here (no secret needed, PKCE flow)
 const CLIENT_ID = "348a315d861541be9c66a25bdd07438a";
-const NAME      = "Omar";
+// Name shown at the top: ?name=Lena in the URL (remembered), else your Spotify display name, else this default
+const DEFAULT_NAME = "Omar";
 const ART_ONLY  = false;   // true = only the big song cover, edge to edge, no text
 const POLL_MS   = 4000;
-const REDIRECT  = location.origin + "/";
+const REDIRECT  = location.origin + location.pathname;   // local: http://127.0.0.1:8888/   GitHub Pages: https://USER.github.io/REPO/
 const SCOPE     = "user-read-currently-playing user-read-playback-state playlist-read-private playlist-read-collaborative";
 
 const $ = id => document.getElementById(id);
 const main = document.querySelector("main");
+{ const q = new URLSearchParams(location.search).get("name"); if (q) localStorage.name = q; }
+let NAME = localStorage.name || DEFAULT_NAME;
+let nameChecked = false;
+async function loadName(tok) {          // use the Spotify display name unless ?name= was given
+  if (nameChecked) return; nameChecked = true;
+  if (localStorage.name) return;
+  try {
+    const r = await fetch("https://api.spotify.com/v1/me", {headers: {Authorization: "Bearer " + tok}});
+    if (r.ok) { const j = await r.json(); if (j.display_name) NAME = j.display_name; }
+  } catch (e) { console.warn(e); }
+}
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 
 // ---- fullscreen: double-click or press F (on a kiosk Pi it is already fullscreen) ----
@@ -192,7 +204,7 @@ function show(it, playing, progress, art, plArt, plName) {
     document.title = `${it.name} – ${sub}`;
   }
   main.classList.toggle("paused", !playing);
-  setTop(playing ? `${NAME} is listening ;)` : "Eardrums resting ...");
+  setTop(playing ? `${NAME} is listening` : "Eardrums resting ...");
   cur = {progress, duration: it.duration_ms, at: Date.now(), playing};
 }
 setInterval(() => {
@@ -207,6 +219,7 @@ async function poll() {
   try {
     if (!localStorage.refresh) { idle("Tap to connect Spotify", false); return; }
     const tok = await access();
+    loadName(tok);
     const r = await fetch("https://api.spotify.com/v1/me/player/currently-playing?additional_types=episode",
       {headers: {Authorization: "Bearer " + tok}});
     if (r.status === 204) idle("");
