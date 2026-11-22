@@ -204,7 +204,7 @@ function show(it, playing, progress, art, plArt, plName) {
     document.title = `${it.name} – ${sub}`;
   }
   main.classList.toggle("paused", !playing);
-  setTop(playing ? `${NAME} is listening` : "Eardrums resting ...");
+  setTop(playing ? `${NAME} is listening ;)` : "Eardrums resting ...");
   cur = {progress, duration: it.duration_ms, at: Date.now(), playing};
 }
 setInterval(() => {
