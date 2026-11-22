@@ -33,7 +33,7 @@
 <body>
 <canvas id="wave"></canvas>
 <div id="top"></div>
-<main class="idle" onclick="if(!localStorage.refresh)login()">Loading…</main>
+<main class="idle" onclick="tapLogin()">Loading…</main>
 <script type="module">
 // 1) Create an app at https://developer.spotify.com/dashboard
 // 2) Add redirect URI exactly:  http://127.0.0.1:8888/
@@ -43,17 +43,19 @@ const CLIENT_ID = "348a315d861541be9c66a25bdd07438a";
 const DEFAULT_NAME = "Omar";
 const ART_ONLY  = false;   // true = only the big song cover, edge to edge, no text
 const POLL_MS   = 4000;
+const LOGIN_EVERY_TIME = true;   // true: login needed each time the URL is opened (session ends when the tab closes). false: stay logged in.
+const store = LOGIN_EVERY_TIME ? sessionStorage : localStorage;
 const REDIRECT  = location.origin + location.pathname;   // local: http://127.0.0.1:8888/   GitHub Pages: https://USER.github.io/REPO/
 const SCOPE     = "user-read-currently-playing user-read-playback-state playlist-read-private playlist-read-collaborative";
 
 const $ = id => document.getElementById(id);
 const main = document.querySelector("main");
-{ const q = new URLSearchParams(location.search).get("name"); if (q) localStorage.name = q; }
-let NAME = localStorage.name || DEFAULT_NAME;
+{ const q = new URLSearchParams(location.search).get("name"); if (q) store.name = q; }
+let NAME = store.name || DEFAULT_NAME;
 let nameChecked = false;
 async function loadName(tok) {          // use the Spotify display name unless ?name= was given
   if (nameChecked) return; nameChecked = true;
-  if (localStorage.name) return;
+  if (store.name) return;
   try {
     const r = await fetch("https://api.spotify.com/v1/me", {headers: {Authorization: "Bearer " + tok}});
     if (r.ok) { const j = await r.json(); if (j.display_name) NAME = j.display_name; }
@@ -67,13 +69,15 @@ document.addEventListener("dblclick", toggleFS);
 document.addEventListener("keydown", e => { if (e.key === "f" || e.key === "F") toggleFS(); });
 
 // ---- auth (PKCE) ----
+window.tapLogin = () => { if (!store.refresh) login(); };
 window.login = async () => {
   const verifier = b64(crypto.getRandomValues(new Uint8Array(64)));
   const challenge = b64(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-  localStorage.verifier = verifier;
+  store.verifier = verifier;
   location = "https://accounts.spotify.com/authorize?" + new URLSearchParams({
     client_id: CLIENT_ID, response_type: "code", redirect_uri: REDIRECT, scope: SCOPE,
-    code_challenge_method: "S256", code_challenge: challenge });
+    code_challenge_method: "S256", code_challenge: challenge,
+    ...(LOGIN_EVERY_TIME ? {show_dialog: "true"} : {}) });
 };
 async function token(body) {
   const r = await fetch("https://accounts.spotify.com/api/token", {
@@ -81,18 +85,18 @@ async function token(body) {
     body: new URLSearchParams({client_id: CLIENT_ID, ...body}) });
   if (!r.ok) throw new Error("token " + r.status);
   const j = await r.json();
-  localStorage.access = j.access_token;
-  localStorage.exp = Date.now() + (j.expires_in - 60) * 1000;
-  localStorage.scope = SCOPE;
-  if (j.refresh_token) localStorage.refresh = j.refresh_token;
+  store.access = j.access_token;
+  store.exp = Date.now() + (j.expires_in - 60) * 1000;
+  store.scope = SCOPE;
+  if (j.refresh_token) store.refresh = j.refresh_token;
 }
 async function access() {
-  if (Date.now() > +localStorage.exp)
-    await token({grant_type: "refresh_token", refresh_token: localStorage.refresh});
-  return localStorage.access;
+  if (Date.now() > +store.exp)
+    await token({grant_type: "refresh_token", refresh_token: store.refresh});
+  return store.access;
 }
 // scopes changed since last login -> force a fresh login once
-if (localStorage.refresh && localStorage.scope && localStorage.scope !== SCOPE) { delete localStorage.refresh; delete localStorage.access; }
+if (store.refresh && store.scope && store.scope !== SCOPE) { delete store.refresh; delete store.access; }
 
 // ---- playlist cover (cached; Spotify-owned playlists are blocked for new apps -> falls back to song art) ----
 const plCache = new Map();
@@ -217,14 +221,14 @@ setInterval(() => {
 async function poll() {
   let wait = POLL_MS;
   try {
-    if (!localStorage.refresh) { idle("Tap to connect Spotify", false); return; }
+    if (!store.refresh) { idle("Tap to connect Spotify", false); return; }
     const tok = await access();
     loadName(tok);
     const r = await fetch("https://api.spotify.com/v1/me/player/currently-playing?additional_types=episode",
       {headers: {Authorization: "Bearer " + tok}});
     if (r.status === 204) idle("");
     else if (r.status === 429) wait = (+r.headers.get("Retry-After") || 10) * 1000;
-    else if (r.status === 401) { await token({grant_type: "refresh_token", refresh_token: localStorage.refresh}); wait = 500; }
+    else if (r.status === 401) { await token({grant_type: "refresh_token", refresh_token: store.refresh}); wait = 500; }
     else if (!r.ok) throw new Error("api " + r.status);
     else {
       const j = await r.json();
@@ -247,7 +251,7 @@ async function poll() {
 (async () => {
   const code = new URLSearchParams(location.search).get("code");
   if (code) {
-    try { await token({grant_type: "authorization_code", code, redirect_uri: REDIRECT, code_verifier: localStorage.verifier}); }
+    try { await token({grant_type: "authorization_code", code, redirect_uri: REDIRECT, code_verifier: store.verifier}); }
     catch (e) { console.warn(e); }
     history.replaceState({}, "", REDIRECT);
   }
